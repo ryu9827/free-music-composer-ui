@@ -23,7 +23,10 @@ import {
 import * as Tone from 'tone'
 import Score from './Score.jsx'
 import {
+	accidentalOf,
+	applyAccidental,
 	createNote,
+	DURATION_DRAG_TYPE,
 	durationFor,
 	DURATIONS,
 	initialNotes,
@@ -35,7 +38,8 @@ import {
 
 const STORAGE_KEY = 'cadence-compositions-v2'
 const LEGACY_STORAGE_KEY = 'cadence-composition-v1'
-const STORAGE_READ_ERROR = 'Saved compositions could not be read. Changes will not be saved.'
+const STORAGE_READ_ERROR =
+	'Saved compositions could not be read. Changes will not be saved.'
 const STORAGE_WRITE_ERROR = 'Could not save your compositions in the browser.'
 const SAMPLE_FILES = {
 	C3: 'C3.mp3',
@@ -86,7 +90,11 @@ function readLibrary() {
 		const stored = localStorage.getItem(STORAGE_KEY)
 		if (stored !== null) {
 			const saved = JSON.parse(stored)
-			if (!saved || !Array.isArray(saved.compositions) || !saved.compositions.length) {
+			if (
+				!saved ||
+				!Array.isArray(saved.compositions) ||
+				!saved.compositions.length
+			) {
 				throw new Error('Invalid composition library')
 			}
 			const compositions = saved.compositions.map((item) => {
@@ -95,7 +103,11 @@ function readLibrary() {
 					? { id: item.id, ...composition }
 					: null
 			})
-			if (!compositions.every(Boolean) || new Set(compositions.map((item) => item.id)).size !== compositions.length) {
+			if (
+				!compositions.every(Boolean) ||
+				new Set(compositions.map((item) => item.id)).size !==
+					compositions.length
+			) {
 				throw new Error('Invalid composition library')
 			}
 			return {
@@ -209,6 +221,8 @@ export default function App() {
 	const selectedNote = notes.find((note) => note.id === selectedId)
 	const selectedDuration = selectedNote ? selectedNote.ticks : duration
 	const selectedIsRest = selectedNote ? selectedNote.isRest : isRest
+	const selectedAccidental =
+		selectedNote && !selectedNote.isRest ? accidentalOf(selectedNote) : null
 	const isPlaying = playbackState === 'playing'
 
 	function updateCompositionField(field, update) {
@@ -243,7 +257,7 @@ export default function App() {
 		try {
 			localStorage.setItem(STORAGE_KEY, JSON.stringify(library))
 			setSaveFailed(false)
-			setNotice((current) => current === STORAGE_WRITE_ERROR ? '' : current)
+			setNotice((current) => (current === STORAGE_WRITE_ERROR ? '' : current))
 		} catch {
 			setSaveFailed(true)
 			setNotice(STORAGE_WRITE_ERROR)
@@ -268,6 +282,15 @@ export default function App() {
 			document.removeEventListener('keydown', handleKeyDown)
 		}
 	}, [isLibraryOpen])
+
+	useEffect(() => {
+		if (!selectedId || isLibraryOpen) return
+		function handleKeyDown(event) {
+			if (event.key === 'Escape') setSelectedId(null)
+		}
+		document.addEventListener('keydown', handleKeyDown)
+		return () => document.removeEventListener('keydown', handleKeyDown)
+	}, [selectedId, isLibraryOpen])
 
 	useEffect(() => {
 		const sampler = new Tone.Sampler({
@@ -359,26 +382,26 @@ export default function App() {
 			transport.position = 0
 			let position = 0
 
-			layoutMeasures(notes)
-				.flat()
-				.forEach((note) => {
-					const beats = note.ticks / 4
-					const eventId = transport.schedule((time) => {
-						if (!note.isRest)
-							samplerRef.current?.triggerAttackRelease(
-								pitchName(note.midi),
-								(60 / tempo) * beats * 0.95,
-								time,
-							)
-						Tone.getDraw().schedule(() => {
-							if (version !== playbackVersionRef.current) return
-							setPlayingId(note.id ?? null)
-							setActiveMidi(note.isRest ? null : note.midi)
-						}, time)
-					}, `${position}i`)
-					eventsRef.current.push(eventId)
-					position += beats * transport.PPQ
-				})
+			const sequence = layoutMeasures(notes).flat()
+			const startIndex = sequence.findIndex((note) => note.id === selectedId)
+			sequence.slice(Math.max(0, startIndex)).forEach((note) => {
+				const beats = note.ticks / 4
+				const eventId = transport.schedule((time) => {
+					if (!note.isRest)
+						samplerRef.current?.triggerAttackRelease(
+							pitchName(note.midi),
+							(60 / tempo) * beats * 0.95,
+							time,
+						)
+					Tone.getDraw().schedule(() => {
+						if (version !== playbackVersionRef.current) return
+						setPlayingId(note.id ?? null)
+						setActiveMidi(note.isRest ? null : note.midi)
+					}, time)
+				}, `${position}i`)
+				eventsRef.current.push(eventId)
+				position += beats * transport.PPQ
+			})
 
 			eventsRef.current.push(
 				transport.schedule((time) => {
@@ -395,14 +418,20 @@ export default function App() {
 		}
 	}
 
-	function insertNote(midi = 60, index = notes.length) {
+	function insertNote(
+		midi = 60,
+		index = notes.length,
+		ticks = duration,
+		accidental,
+	) {
 		clearPlayback()
-		const note = createNote(midi, duration, isRest)
+		const note = createNote(midi, ticks, isRest, accidental)
 		setNotes((current) => [
 			...current.slice(0, index),
 			note,
 			...current.slice(index),
 		])
+		setDuration(ticks)
 		setSelectedId(note.id)
 		if (!note.isRest) previewNote(midi)
 	}
@@ -443,6 +472,15 @@ export default function App() {
 	function changeNoteType(rest) {
 		setIsRest(rest)
 		if (selectedId) updateNote(selectedId, { isRest: rest })
+	}
+
+	function toggleAccidental(accidental) {
+		const change = applyAccidental(
+			selectedNote,
+			selectedAccidental === accidental ? undefined : accidental,
+		)
+		updateNote(selectedId, change)
+		previewNote(change.midi)
 	}
 
 	function selectNote(id) {
@@ -507,18 +545,27 @@ export default function App() {
 			notes: [],
 		}
 		setLibrary((current) => {
-			const index = current.compositions.findIndex((entry) => entry.id === item.id)
+			const index = current.compositions.findIndex(
+				(entry) => entry.id === item.id,
+			)
 			if (index < 0) return current
-			const compositions = current.compositions.filter((entry) => entry.id !== item.id)
+			const compositions = current.compositions.filter(
+				(entry) => entry.id !== item.id,
+			)
 			if (compositions.length === 0) {
-				return { ...current, compositions: [emptyComposition], activeId: emptyComposition.id }
+				return {
+					...current,
+					compositions: [emptyComposition],
+					activeId: emptyComposition.id,
+				}
 			}
 			return {
 				...current,
 				compositions,
-				activeId: current.activeId === item.id
-					? compositions[Math.min(index, compositions.length - 1)].id
-					: current.activeId,
+				activeId:
+					current.activeId === item.id
+						? compositions[Math.min(index, compositions.length - 1)].id
+						: current.activeId,
 			}
 		})
 	}
@@ -597,14 +644,23 @@ export default function App() {
 											<button
 												type='button'
 												className='library-item-select'
-												aria-current={item.id === library.activeId ? 'true' : undefined}
+												aria-current={
+													item.id === library.activeId ? 'true' : undefined
+												}
 												title={item.title || 'Untitled composition'}
 												onClick={() => switchComposition(item.id)}
 											>
-												<span className='library-item-icon'><Music2 size={16} /></span>
+												<span className='library-item-icon'>
+													<Music2 size={16} />
+												</span>
 												<span className='library-item-content'>
-													<strong>{item.title || 'Untitled composition'}</strong>
-													<small>{item.notes.length} {item.notes.length === 1 ? 'note' : 'notes'}</small>
+													<strong>
+														{item.title || 'Untitled composition'}
+													</strong>
+													<small>
+														{item.notes.length}{' '}
+														{item.notes.length === 1 ? 'note' : 'notes'}
+													</small>
 												</span>
 												{item.id === library.activeId && <Check size={16} />}
 											</button>
@@ -620,7 +676,11 @@ export default function App() {
 										</div>
 									))}
 								</div>
-								<button type='button' className='library-new' onClick={newComposition}>
+								<button
+									type='button'
+									className='library-new'
+									onClick={newComposition}
+								>
 									<Plus size={16} /> New composition
 								</button>
 							</div>
@@ -691,71 +751,6 @@ export default function App() {
 						</div>
 
 						<div className='score-toolbar'>
-							<div className='toolbar-group'>
-								<span className='toolbar-label'>NOTE VALUE</span>
-								<div
-									className='duration-buttons'
-									role='group'
-									aria-label='Note duration'
-								>
-									{DURATIONS.map((item) => (
-										<button
-											key={item.ticks}
-											type='button'
-											title={`${item.label} note`}
-											aria-label={`${item.label} note`}
-											aria-pressed={selectedDuration === item.ticks}
-											className={
-												selectedDuration === item.ticks ? 'active' : ''
-											}
-											onClick={() => changeDuration(item.ticks)}
-										>
-											<span
-												className={`duration-symbol duration-${item.notation}`}
-											>
-												{item.ticks === 16
-													? '𝅝'
-													: item.ticks === 8
-														? '𝅗𝅥'
-														: item.ticks === 4
-															? '♩'
-															: item.ticks === 2
-																? '♪'
-																: '𝅘𝅥𝅯'}
-											</span>
-											<span>{item.fraction}</span>
-										</button>
-									))}
-								</div>
-							</div>
-							<div className='toolbar-separator' />
-							<div className='toolbar-group'>
-								<span className='toolbar-label'>TYPE</span>
-								<div
-									className='type-buttons'
-									role='group'
-									aria-label='Note type'
-								>
-									<button
-										type='button'
-										aria-pressed={!selectedIsRest}
-										className={!selectedIsRest ? 'active' : ''}
-										onClick={() => changeNoteType(false)}
-										title='Note'
-									>
-										<Music2 size={17} /> Note
-									</button>
-									<button
-										type='button'
-										aria-pressed={selectedIsRest}
-										className={selectedIsRest ? 'active' : ''}
-										onClick={() => changeNoteType(true)}
-										title='Rest'
-									>
-										<span className='rest-symbol'>𝄽</span> Rest
-									</button>
-								</div>
-							</div>
 							<div className='toolbar-spacer' />
 							<button
 								className='toolbar-icon'
@@ -770,7 +765,14 @@ export default function App() {
 							<button
 								className='add-note-button'
 								type='button'
-								onClick={() => insertNote(selectedNote?.midi ?? 60)}
+								onClick={() =>
+									insertNote(
+										selectedNote?.midi ?? 60,
+										notes.length,
+										duration,
+										selectedNote?.accidental,
+									)
+								}
 							>
 								<Plus size={16} /> Add note
 							</button>
@@ -898,6 +900,112 @@ export default function App() {
 								<span>{volume}%</span>
 							</div>
 						</section>
+						<section className='side-section note-input-section'>
+							<div className='toolbar-group'>
+								<span className='toolbar-label'>NOTE VALUE</span>
+								<div
+									className='duration-buttons'
+									role='group'
+									aria-label='Note duration'
+								>
+									{DURATIONS.map((item) => (
+										<button
+											key={item.ticks}
+											type='button'
+											draggable
+											title={`${item.label} note`}
+											aria-label={`${item.label} note`}
+											aria-pressed={selectedDuration === item.ticks}
+											className={
+												selectedDuration === item.ticks ? 'active' : ''
+											}
+											onClick={() => changeDuration(item.ticks)}
+											onDragStart={(event) => {
+												event.dataTransfer.setData(
+													DURATION_DRAG_TYPE,
+													String(item.ticks),
+												)
+												event.dataTransfer.effectAllowed = 'copy'
+											}}
+										>
+											<span
+												className={`duration-symbol duration-${item.notation}`}
+											>
+												{item.ticks === 16
+													? '𝅝'
+													: item.ticks === 8
+														? '𝅗𝅥'
+														: item.ticks === 4
+															? '♩'
+															: item.ticks === 2
+																? '♪'
+																: '𝅘𝅥𝅯'}
+											</span>
+											<span>{item.fraction}</span>
+										</button>
+									))}
+								</div>
+							</div>
+							<div className='toolbar-group'>
+								<span className='toolbar-label'>TYPE</span>
+								<div
+									className='type-buttons'
+									role='group'
+									aria-label='Note type'
+								>
+									<button
+										type='button'
+										aria-pressed={!selectedIsRest}
+										className={!selectedIsRest ? 'active' : ''}
+										onClick={() => changeNoteType(false)}
+										title='Note'
+									>
+										<Music2 size={17} /> Note
+									</button>
+									<button
+										type='button'
+										aria-pressed={selectedIsRest}
+										className={selectedIsRest ? 'active' : ''}
+										onClick={() => changeNoteType(true)}
+										title='Rest'
+									>
+										<span className='rest-symbol'>𝄽</span> Rest
+									</button>
+								</div>
+							</div>
+							<div className='toolbar-group'>
+								<span className='toolbar-label'>ACCIDENTAL</span>
+								<div
+									className='accidental-buttons'
+									role='group'
+									aria-label='Accidental'
+								>
+									{[
+										['sharp', '♯', 'Sharp'],
+										['flat', '♭', 'Flat'],
+									].map(([accidental, symbol, label]) => (
+										<button
+											key={accidental}
+											type='button'
+											title={label}
+											aria-pressed={selectedAccidental === accidental}
+											className={
+												selectedAccidental === accidental ? 'active' : ''
+											}
+											disabled={
+												!selectedNote ||
+												selectedNote.isRest ||
+												!applyAccidental(selectedNote, accidental)
+											}
+											onClick={() => toggleAccidental(accidental)}
+										>
+											<span className='accidental-symbol'>{symbol}</span>{' '}
+											{label}
+										</button>
+									))}
+								</div>
+							</div>
+						</section>
 
 						<section className='side-section note-section'>
 							<div className='side-heading'>
@@ -919,7 +1027,10 @@ export default function App() {
 											<strong>
 												{selectedNote.isRest
 													? 'Rest'
-													: pitchName(selectedNote.midi)}
+													: pitchName(
+															selectedNote.midi,
+															selectedNote.accidental,
+														)}
 											</strong>
 											<small>
 												{durationFor(selectedNote.ticks).label}{' '}
@@ -949,7 +1060,10 @@ export default function App() {
 											<strong>
 												{selectedNote.isRest
 													? '—'
-													: pitchName(selectedNote.midi)}
+													: pitchName(
+															selectedNote.midi,
+															selectedNote.accidental,
+														)}
 											</strong>
 											<button
 												type='button'
@@ -1026,7 +1140,10 @@ export default function App() {
 			</main>
 			{(notice || saveFailed) && (
 				<div role='status' className='notice'>
-					{notice || (initialLibrary.readError ? STORAGE_READ_ERROR : STORAGE_WRITE_ERROR)}
+					{notice ||
+						(initialLibrary.readError
+							? STORAGE_READ_ERROR
+							: STORAGE_WRITE_ERROR)}
 				</div>
 			)}
 		</div>

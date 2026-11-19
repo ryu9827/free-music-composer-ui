@@ -108,16 +108,15 @@ h1, h2, p { margin: 0; }
 .score-toolbar { min-height: 76px; padding: 12px 24px; display: flex; align-items: center; gap: 16px; background: #f9fbf9; border-top: 1px solid #eef2ee; border-bottom: 1px solid #e9eee9; }
 .toolbar-group { flex: none; }
 .toolbar-label { display: block; margin-bottom: 6px; font-size: 8px; }
-.duration-buttons, .type-buttons { display: flex; align-items: stretch; gap: 3px; }
-.duration-buttons button, .type-buttons button { min-height: 35px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: transparent; border-radius: 4px; color: #7d8f85; font-size: 10px; font-weight: 800; }
-.duration-buttons button { min-width: 43px; gap: 4px; padding: 0 5px; }
-.duration-buttons button:hover, .type-buttons button:hover { color: var(--green); background: #edf5ef; }
-.duration-buttons button.active, .type-buttons button.active { color: #2b715e; background: #e6f2e9; border-color: #d8ebde; }
+.duration-buttons, .type-buttons, .accidental-buttons { display: flex; align-items: stretch; gap: 3px; }
+.duration-buttons button, .type-buttons button, .accidental-buttons button { min-height: 35px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: transparent; border-radius: 4px; color: #7d8f85; font-size: 10px; font-weight: 800; }
+.duration-buttons button { flex: 1; gap: 4px; padding: 0 3px; }
+.duration-buttons button:hover, .type-buttons button:hover, .accidental-buttons button:not(:disabled):hover { color: var(--green); background: #edf5ef; }
+.duration-buttons button.active, .type-buttons button.active, .accidental-buttons button.active { color: #2b715e; background: #e6f2e9; border-color: #d8ebde; }
 .duration-symbol { color: inherit; font-family: 'Segoe UI Symbol', 'Noto Music', serif; font-size: 20px; line-height: 1; }
 .duration-16 { font-size: 22px; }
-.toolbar-separator { align-self: stretch; width: 1px; margin: 3px 0; background: #e5ece5; }
-.type-buttons button { gap: 5px; padding: 0 8px; }
-.rest-symbol { font-family: 'Segoe UI Symbol', serif; font-size: 19px; line-height: 1; }
+.type-buttons button, .accidental-buttons button { flex: 1; gap: 5px; padding: 0 8px; }
+.rest-symbol, .accidental-symbol { font-family: 'Segoe UI Symbol', serif; font-size: 19px; line-height: 1; }
 .toolbar-spacer { flex: 1; }
 .toolbar-icon { width: 35px; height: 35px; border-radius: 4px; flex: none; }
 .add-note-button { flex: none; height: 36px; padding: 0 12px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 4px; color: white; background: #357967; font-size: 11px; font-weight: 800; white-space: nowrap; }
@@ -134,11 +133,15 @@ h1, h2, p { margin: 0; }
 .note-hit-area { cursor: grab; stroke: none; }
 .note-hit-area:active { cursor: grabbing; }
 .note-selection { fill: none; stroke: #83b49b; stroke-width: 1.5; pointer-events: none; }
+.drop-preview { pointer-events: none; }
+.drop-preview ellipse { fill: #216a5b; opacity: .5; }
+.drop-preview text { fill: #216a5b; font-size: 11px; font-weight: 800; }
 .sheet-footer { display: flex; flex-wrap: wrap; gap: 22px; padding: 8px 4px 0; color: #a3b0a7; font-size: 9px; font-weight: 800; }
 .sheet-footer span:first-child { display: flex; align-items: center; gap: 6px; }
 
 .sidebar { display: flex; flex-direction: column; gap: 14px; }
 .side-section { padding: 21px; }
+.note-input-section { position: sticky; top: 16px; z-index: 1; display: flex; flex-direction: column; gap: 18px; box-shadow: 0 8px 22px #263e3114; }
 .side-heading { gap: 10px; }
 .side-icon { width: 36px; height: 36px; }
 .side-icon.peach { color: #ca8068; background: #fcf0ea; }
@@ -218,6 +221,7 @@ h1, h2, p { margin: 0; }
   .workspace-intro { margin-bottom: 20px; }
   .editor-grid { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .note-input-section { position: static; grid-column: 1 / -1; box-shadow: none; }
   .side-note { grid-column: 1 / -1; }
   .sheet-area { padding-inline: 14px; }
   .keyboard-section { padding-inline: 18px; }
@@ -234,8 +238,6 @@ h1, h2, p { margin: 0; }
   .composition-meta .meta-pill, .export-button span { display: none; }
   .export-button { width: 34px; padding: 0; }
   .score-toolbar { padding-inline: 12px; gap: 8px; }
-  .duration-buttons button { min-width: 38px; padding-inline: 3px; }
-  .toolbar-separator { display: none; }
   .toolbar-spacer { display: none; }
   .sidebar { grid-template-columns: 1fr; }
   .side-note { grid-column: auto; }

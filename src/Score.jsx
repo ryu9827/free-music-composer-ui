@@ -9,11 +9,14 @@ import {
 	Voice,
 } from 'vexflow'
 import {
+	DURATION_DRAG_TYPE,
 	durationFor,
+	DURATIONS,
 	layoutMeasures,
 	pitchKey,
 	pitchName,
 	shiftPitch,
+	stepsFromMiddleC,
 } from './music.js'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -93,7 +96,9 @@ export default function Score({
 			stave.setContext(context).draw()
 
 			const drawnNotes = measure.map((event) => {
-				const key = event.isRest ? 'b/4' : pitchKey(event.midi)
+				const key = event.isRest
+					? 'b/4'
+					: pitchKey(event.midi, event.accidental)
 				const duration = `${durationFor(event.ticks).notation}${event.isRest ? 'r' : ''}`
 				const note = new StaveNote({
 					clef: 'treble',
@@ -147,6 +152,7 @@ export default function Score({
 					x: (note.getNoteHeadBeginX() + note.getNoteHeadEndX()) / 2,
 					y: note.getYs()[0],
 					midi: event.midi,
+					accidental: event.accidental,
 					isRest: event.isRest,
 				})
 			})
@@ -157,19 +163,22 @@ export default function Score({
 		svg.dataset.rowHeight = String(rowHeight)
 		svg.dataset.rowCount = String(Math.ceil(visibleMeasures.length / columns))
 		const interactions = svgElement('g', { class: 'score-interactions' })
-		staves.forEach((stave) => {
-			interactions.appendChild(
-				svgElement('rect', {
-					x: stave.x,
-					y: stave.top,
-					width: stave.endX - stave.x,
-					height: stave.bottom - stave.top,
-					fill: 'transparent',
-					class: 'staff-hit-area',
-					'data-measure-index': stave.measureIndex,
-				}),
-			)
-		})
+		// While a note is selected, stray clicks on the empty staff must not insert notes.
+		if (!selectedId) {
+			staves.forEach((stave) => {
+				interactions.appendChild(
+					svgElement('rect', {
+						x: stave.x,
+						y: stave.top,
+						width: stave.endX - stave.x,
+						height: stave.bottom - stave.top,
+						fill: 'transparent',
+						class: 'staff-hit-area',
+						'data-measure-index': stave.measureIndex,
+					}),
+				)
+			})
+		}
 		positions.forEach((position) => {
 			if (position.id === selectedId) {
 				interactions.appendChild(
@@ -193,7 +202,7 @@ export default function Score({
 					role: 'button',
 					'aria-label': position.isRest
 						? 'Rest'
-						: `Note ${pitchName(position.midi)}`,
+						: `Note ${pitchName(position.midi, position.accidental)}`,
 				}),
 			)
 		})
@@ -217,6 +226,8 @@ export default function Score({
 
 	function handlePointerDown(event) {
 		if (event.button !== 0) return
+		// Pressing inside a page text selection would start a native drag that cancels the note drag.
+		window.getSelection().removeAllRanges()
 		const noteId = event.target.getAttribute('data-note-id')
 		const measureIndex = event.target.getAttribute('data-measure-index')
 		const point = getPoint(event)
@@ -228,25 +239,41 @@ export default function Score({
 				start: point,
 				midi: position.midi,
 				lastMidi: position.midi,
+				accidental: position.accidental,
 				isRest: position.isRest,
 			}
 			event.currentTarget.setPointerCapture(event.pointerId)
 			onSelect(noteId)
-			if (!position.isRest) onPreview(position.midi)
 		} else if (measureIndex !== null) {
-			const stave = stavesRef.current[Number(measureIndex)]
-			const pitch = shiftPitch(60, Math.round((stave.c4Y - point.y) / 5))
-			const inMeasure = positionsRef.current.filter(
-				(item) => item.measureIndex === Number(measureIndex),
-			)
-			const next = inMeasure.find((item) => item.x > point.x)
-			const index = next
-				? next.index
-				: inMeasure.length
-					? inMeasure[inMeasure.length - 1].index + 1
-					: notes.length
-			onInsert(pitch, index)
+			insertAt(point, stavesRef.current[Number(measureIndex)])
 		}
+	}
+
+	function staveAt(point) {
+		return stavesRef.current.find(
+			(item) =>
+				point.y >= item.top &&
+				point.y <= item.bottom &&
+				point.x >= item.x &&
+				point.x <= item.endX,
+		)
+	}
+
+	function pitchAt(point, stave) {
+		return shiftPitch(60, Math.round((stave.c4Y - point.y) / 5))
+	}
+
+	function insertAt(point, stave, ticks) {
+		const inMeasure = positionsRef.current.filter(
+			(item) => item.measureIndex === stave.measureIndex,
+		)
+		const next = inMeasure.find((item) => item.x > point.x)
+		const index = next
+			? next.index
+			: inMeasure.length
+				? inMeasure[inMeasure.length - 1].index + 1
+				: notes.length
+		onInsert(pitchAt(point, stave), index, ticks)
 	}
 
 	function handlePointerMove(event) {
@@ -257,22 +284,16 @@ export default function Score({
 			const midi = shiftPitch(
 				drag.midi,
 				Math.round((drag.start.y - point.y) / 5),
+				drag.accidental,
 			)
 			if (midi !== drag.lastMidi) {
 				drag.lastMidi = midi
 				onPitchChange(drag.id, midi)
-				onPreview(midi)
 			}
 		}
 
 		if (Math.abs(point.x - drag.start.x) < 12) return
-		const stave = stavesRef.current.find(
-			(item) =>
-				point.y >= item.top &&
-				point.y <= item.bottom &&
-				point.x >= item.x &&
-				point.x <= item.endX,
-		)
+		const stave = staveAt(point)
 		if (!stave) return
 		const candidates = positionsRef.current.filter(
 			(item) => item.measureIndex === stave.measureIndex && item.id !== drag.id,
@@ -287,6 +308,56 @@ export default function Score({
 		if (nearest) onReorder(drag.id, nearest.id, point.x > nearest.x)
 	}
 
+	function handlePointerUp() {
+		const drag = dragRef.current
+		dragRef.current = null
+		if (drag && !drag.isRest) onPreview(drag.lastMidi)
+	}
+
+	function showDropPreview(point, stave) {
+		const svg = containerRef.current.querySelector('svg')
+		let preview = svg.querySelector('.drop-preview')
+		if (!preview) {
+			preview = svgElement('g', { class: 'drop-preview' })
+			preview.append(
+				svgElement('ellipse', { rx: 6, ry: 4.5, transform: 'rotate(-20)' }),
+				svgElement('text', { x: 11, y: -8 }),
+			)
+			svg.appendChild(preview)
+		}
+		const pitch = pitchAt(point, stave)
+		const y = stave.c4Y - stepsFromMiddleC(pitch) * 5
+		preview.setAttribute('transform', `translate(${point.x} ${y})`)
+		preview.lastChild.textContent = pitchName(pitch)
+	}
+
+	function hideDropPreview() {
+		containerRef.current.querySelector('.drop-preview')?.remove()
+	}
+
+	function handleDragOver(event) {
+		if (!event.dataTransfer.types.includes(DURATION_DRAG_TYPE)) return
+		const point = getPoint(event)
+		const stave = staveAt(point)
+		if (!stave) {
+			hideDropPreview()
+			return
+		}
+		event.preventDefault()
+		event.dataTransfer.dropEffect = 'copy'
+		showDropPreview(point, stave)
+	}
+
+	function handleDrop(event) {
+		hideDropPreview()
+		const ticks = Number(event.dataTransfer.getData(DURATION_DRAG_TYPE))
+		const point = getPoint(event)
+		const stave = staveAt(point)
+		if (!stave || !DURATIONS.some((item) => item.ticks === ticks)) return
+		event.preventDefault()
+		insertAt(point, stave, ticks)
+	}
+
 	function handleKeyDown(event) {
 		const noteId = event.target.getAttribute('data-note-id')
 		const note = notes.find((item) => item.id === noteId)
@@ -299,7 +370,11 @@ export default function Score({
 			!note.isRest
 		) {
 			event.preventDefault()
-			const midi = shiftPitch(note.midi, event.key === 'ArrowUp' ? 1 : -1)
+			const midi = shiftPitch(
+				note.midi,
+				event.key === 'ArrowUp' ? 1 : -1,
+				note.accidental,
+			)
 			onPitchChange(noteId, midi)
 			onPreview(midi)
 		} else if (event.key === 'Enter' || event.key === ' ') {
@@ -315,12 +390,16 @@ export default function Score({
 			className='score-canvas'
 			onPointerDown={handlePointerDown}
 			onPointerMove={handlePointerMove}
-			onPointerUp={() => {
-				dragRef.current = null
-			}}
+			onPointerUp={handlePointerUp}
 			onPointerCancel={() => {
 				dragRef.current = null
 			}}
+			onDragOver={handleDragOver}
+			onDragLeave={(event) => {
+				if (!event.currentTarget.contains(event.relatedTarget))
+					hideDropPreview()
+			}}
+			onDrop={handleDrop}
 			onKeyDown={handleKeyDown}
 		/>
 	)
