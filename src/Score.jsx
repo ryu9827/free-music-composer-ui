@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
 	Accidental,
 	Beam,
+	Dot,
 	Formatter,
 	Renderer,
 	Stave,
@@ -11,12 +12,13 @@ import {
 import {
 	DURATION_DRAG_TYPE,
 	durationFor,
-	DURATIONS,
+	isDuration,
 	layoutMeasures,
 	pitchKey,
 	pitchName,
 	shiftPitch,
 	stepsFromMiddleC,
+	timeSignatureFor,
 } from './music.js'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -31,6 +33,7 @@ function svgElement(name, attributes) {
 
 export default function Score({
 	notes,
+	timeSignature,
 	selectedId,
 	playingId,
 	onSelect,
@@ -56,12 +59,11 @@ export default function Score({
 
 	useEffect(() => {
 		const container = containerRef.current
-		const measures = layoutMeasures(notes)
+		const meter = timeSignatureFor(timeSignature)
+		const measures = layoutMeasures(notes, meter.ticks)
 		const visibleMeasures = [...measures]
 		while (visibleMeasures.length < 4) {
-			visibleMeasures.push([
-				{ ticks: 16, isRest: true, filler: true, offset: 0 },
-			])
+			visibleMeasures.push(layoutMeasures([], meter.ticks)[0])
 		}
 
 		const columns = width >= 720 ? 2 : 1
@@ -92,20 +94,22 @@ export default function Score({
 				measureWidth,
 			)
 			if (column === 0) stave.addClef('treble')
-			if (measureIndex === 0) stave.addTimeSignature('4/4')
+			if (measureIndex === 0) stave.addTimeSignature(meter.value)
 			stave.setContext(context).draw()
 
 			const drawnNotes = measure.map((event) => {
 				const key = event.isRest
 					? 'b/4'
 					: pitchKey(event.midi, event.accidental)
-				const duration = `${durationFor(event.ticks).notation}${event.isRest ? 'r' : ''}`
+				const { notation, dots } = durationFor(event.ticks)
+				const duration = `${notation}${dots ? 'd' : ''}${event.isRest ? 'r' : ''}`
 				const note = new StaveNote({
 					clef: 'treble',
 					keys: [key],
 					duration,
 					auto_stem: true,
 				})
+				if (dots) Dot.buildAndAttach([note], { all: true })
 				const color =
 					event.id === playingId
 						? '#dd7655'
@@ -118,11 +122,15 @@ export default function Score({
 				return note
 			})
 
-			const voice = new Voice('4/4')
+			const voice = new Voice(meter.value)
 				.setMode(Voice.Mode.SOFT)
 				.addTickables(drawnNotes)
 			Accidental.applyAccidentals([voice], 'C')
-			const beams = Beam.applyAndGetBeams(voice)
+			const beams = Beam.applyAndGetBeams(
+				voice,
+				undefined,
+				Beam.getDefaultBeamGroups(meter.value),
+			)
 			new Formatter()
 				.joinVoices([voice])
 				.formatToStave([voice], stave, { stave })
@@ -209,7 +217,7 @@ export default function Score({
 		svg.appendChild(interactions)
 		positionsRef.current = positions
 		stavesRef.current = staves
-	}, [notes, selectedId, playingId, width])
+	}, [notes, timeSignature, selectedId, playingId, width])
 
 	function getPoint(event) {
 		const svg = containerRef.current.querySelector('svg')
@@ -353,7 +361,7 @@ export default function Score({
 		const ticks = Number(event.dataTransfer.getData(DURATION_DRAG_TYPE))
 		const point = getPoint(event)
 		const stave = staveAt(point)
-		if (!stave || !DURATIONS.some((item) => item.ticks === ticks)) return
+		if (!stave || !isDuration(ticks)) return
 		event.preventDefault()
 		insertAt(point, stave, ticks)
 	}

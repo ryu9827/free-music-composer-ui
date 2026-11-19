@@ -108,14 +108,14 @@ h1, h2, p { margin: 0; }
 .score-toolbar { min-height: 76px; padding: 12px 24px; display: flex; align-items: center; gap: 16px; background: #f9fbf9; border-top: 1px solid #eef2ee; border-bottom: 1px solid #e9eee9; }
 .toolbar-group { flex: none; }
 .toolbar-label { display: block; margin-bottom: 6px; font-size: 8px; }
-.duration-buttons, .type-buttons, .accidental-buttons { display: flex; align-items: stretch; gap: 3px; }
-.duration-buttons button, .type-buttons button, .accidental-buttons button { min-height: 35px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: transparent; border-radius: 4px; color: #7d8f85; font-size: 10px; font-weight: 800; }
+.duration-buttons, .type-buttons, .accidental-buttons, .time-buttons { display: flex; align-items: stretch; gap: 3px; }
+.duration-buttons button, .type-buttons button, .accidental-buttons button, .time-buttons button { min-height: 35px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: transparent; border-radius: 4px; color: #7d8f85; font-size: 10px; font-weight: 800; }
 .duration-buttons button { flex: 1; gap: 4px; padding: 0 3px; }
-.duration-buttons button:hover, .type-buttons button:hover, .accidental-buttons button:not(:disabled):hover { color: var(--green); background: #edf5ef; }
-.duration-buttons button.active, .type-buttons button.active, .accidental-buttons button.active { color: #2b715e; background: #e6f2e9; border-color: #d8ebde; }
+.duration-buttons button:not(:disabled):hover, .type-buttons button:hover, .accidental-buttons button:not(:disabled):hover, .time-buttons button:hover { color: var(--green); background: #edf5ef; }
+.duration-buttons button.active, .type-buttons button.active, .accidental-buttons button.active, .time-buttons button.active { color: #2b715e; background: #e6f2e9; border-color: #d8ebde; }
 .duration-symbol { color: inherit; font-family: 'Segoe UI Symbol', 'Noto Music', serif; font-size: 20px; line-height: 1; }
 .duration-16 { font-size: 22px; }
-.type-buttons button, .accidental-buttons button { flex: 1; gap: 5px; padding: 0 8px; }
+.type-buttons button, .accidental-buttons button, .time-buttons button { flex: 1; gap: 5px; padding: 0 8px; }
 .rest-symbol, .accidental-symbol { font-family: 'Segoe UI Symbol', serif; font-size: 19px; line-height: 1; }
 .toolbar-spacer { flex: 1; }
 .toolbar-icon { width: 35px; height: 35px; border-radius: 4px; flex: none; }
@@ -141,7 +141,9 @@ h1, h2, p { margin: 0; }
 
 .sidebar { display: flex; flex-direction: column; gap: 14px; }
 .side-section { padding: 21px; }
-.note-input-section { position: sticky; top: 16px; z-index: 1; display: flex; flex-direction: column; gap: 18px; box-shadow: 0 8px 22px #263e3114; }
+.sidebar-sticky { position: sticky; top: 16px; z-index: 1; display: flex; flex-direction: column; gap: 14px; }
+.sidebar-sticky .side-section { box-shadow: 0 8px 22px #263e3114; }
+.note-input-section { display: flex; flex-direction: column; gap: 18px; }
 .side-heading { gap: 10px; }
 .side-icon { width: 36px; height: 36px; }
 .side-icon.peach { color: #ca8068; background: #fcf0ea; }
@@ -221,7 +223,9 @@ h1, h2, p { margin: 0; }
   .workspace-intro { margin-bottom: 20px; }
   .editor-grid { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .note-input-section { position: static; grid-column: 1 / -1; box-shadow: none; }
+  .sidebar-sticky { display: contents; }
+  .sidebar-sticky .side-section { box-shadow: none; }
+  .note-input-section { grid-column: 1 / -1; order: -1; }
   .side-note { grid-column: 1 / -1; }
   .sheet-area { padding-inline: 14px; }
   .keyboard-section { padding-inline: 18px; }

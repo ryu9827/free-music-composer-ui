@@ -30,10 +30,15 @@ import {
 	durationFor,
 	DURATIONS,
 	initialNotes,
+	isDotted,
+	isDuration,
 	layoutMeasures,
 	MAX_PITCH,
 	MIN_PITCH,
 	pitchName,
+	TIME_SIGNATURES,
+	timeSignatureFor,
+	withDot,
 } from './music.js'
 
 const STORAGE_KEY = 'cadence-compositions-v2'
@@ -70,7 +75,7 @@ function readComposition(saved) {
 			Number.isInteger(note.midi) &&
 			note.midi >= MIN_PITCH &&
 			note.midi <= MAX_PITCH &&
-			DURATIONS.some((duration) => duration.ticks === note.ticks),
+			isDuration(note.ticks),
 	)
 	if (notes.length !== saved.notes.length) return null
 	return {
@@ -79,6 +84,7 @@ function readComposition(saved) {
 		tempo: Number.isFinite(saved.tempo)
 			? Math.max(40, Math.min(200, saved.tempo))
 			: 108,
+		timeSignature: timeSignatureFor(saved.timeSignature).value,
 		notes,
 	}
 }
@@ -197,7 +203,8 @@ export default function App() {
 	const composition = library.compositions.find(
 		(item) => item.id === library.activeId,
 	)
-	const { title, tempo, notes } = composition
+	const { title, tempo, notes, timeSignature } = composition
+	const meter = timeSignatureFor(timeSignature)
 	const [selectedId, setSelectedId] = useState(null)
 	const [duration, setDuration] = useState(4)
 	const [isRest, setIsRest] = useState(false)
@@ -220,6 +227,9 @@ export default function App() {
 	const noticeTimeoutRef = useRef(null)
 	const selectedNote = notes.find((note) => note.id === selectedId)
 	const selectedDuration = selectedNote ? selectedNote.ticks : duration
+	const plainDuration = withDot(selectedDuration, false)
+	const dotted = isDotted(selectedDuration)
+	const dotToggle = withDot(selectedDuration, !dotted)
 	const selectedIsRest = selectedNote ? selectedNote.isRest : isRest
 	const selectedAccidental =
 		selectedNote && !selectedNote.isRest ? accidentalOf(selectedNote) : null
@@ -382,7 +392,7 @@ export default function App() {
 			transport.position = 0
 			let position = 0
 
-			const sequence = layoutMeasures(notes).flat()
+			const sequence = layoutMeasures(notes, meter.ticks).flat()
 			const startIndex = sequence.findIndex((note) => note.id === selectedId)
 			sequence.slice(Math.max(0, startIndex)).forEach((note) => {
 				const beats = note.ticks / 4
@@ -469,6 +479,12 @@ export default function App() {
 		if (selectedId) updateNote(selectedId, { ticks })
 	}
 
+	// Keeps the current dot on a newly chosen value when that dotted value exists and fits the bar.
+	function paletteTicks(ticks) {
+		const dottedTicks = dotted && withDot(ticks, true)
+		return dottedTicks && dottedTicks <= meter.ticks ? dottedTicks : ticks
+	}
+
 	function changeNoteType(rest) {
 		setIsRest(rest)
 		if (selectedId) updateNote(selectedId, { isRest: rest })
@@ -495,6 +511,15 @@ export default function App() {
 	function changeTempo(value) {
 		clearPlayback()
 		setTempo(Math.max(40, Math.min(200, Number(value) || 40)))
+	}
+
+	function changeTimeSignature(value) {
+		clearPlayback()
+		updateCompositionField('timeSignature', value)
+		const { ticks } = timeSignatureFor(value)
+		if (duration > ticks) {
+			setDuration(DURATIONS.find((item) => item.ticks <= ticks).ticks)
+		}
 	}
 
 	function newComposition() {
@@ -751,6 +776,27 @@ export default function App() {
 						</div>
 
 						<div className='score-toolbar'>
+							<div className='toolbar-group'>
+								<span className='toolbar-label'>TIME</span>
+								<div
+									className='time-buttons'
+									role='group'
+									aria-label='Time signature'
+								>
+									{TIME_SIGNATURES.map((item) => (
+										<button
+											key={item.value}
+											type='button'
+											title={`${item.value} time`}
+											aria-pressed={meter.value === item.value}
+											className={meter.value === item.value ? 'active' : ''}
+											onClick={() => changeTimeSignature(item.value)}
+										>
+											{item.value}
+										</button>
+									))}
+								</div>
+							</div>
 							<div className='toolbar-spacer' />
 							<button
 								className='toolbar-icon'
@@ -789,6 +835,7 @@ export default function App() {
 							<div className='score-scroll' ref={scoreRef}>
 								<Score
 									notes={notes}
+									timeSignature={meter.value}
 									selectedId={selectedId}
 									playingId={playingId}
 									onSelect={selectNote}
@@ -803,7 +850,7 @@ export default function App() {
 								<span>
 									<span className='sheet-footer-dot' /> TREBLE CLEF
 								</span>
-								<span>4 / 4 TIME</span>
+								<span>{meter.value.replace('/', ' / ')} TIME</span>
 								<span>
 									{notes.length} {notes.length === 1 ? 'NOTE' : 'NOTES'}
 								</span>
@@ -812,200 +859,212 @@ export default function App() {
 					</section>
 
 					<aside className='sidebar'>
-						<section className='side-section playback-section'>
-							<div className='side-heading'>
-								<span className='side-icon peach'>
-									<Headphones size={17} />
-								</span>
-								<div>
-									<span className='overline'>LISTEN BACK</span>
-									<h2>Playback</h2>
+						<div className='sidebar-sticky'>
+							<section className='side-section playback-section'>
+								<div className='side-heading'>
+									<span className='side-icon peach'>
+										<Headphones size={17} />
+									</span>
+									<div>
+										<span className='overline'>LISTEN BACK</span>
+										<h2>Playback</h2>
+									</div>
 								</div>
-							</div>
-							<div className='playback-controls'>
-								<button
-									className='play-button'
-									type='button'
-									aria-label={isPlaying ? 'Stop playback' : 'Play composition'}
-									title={isPlaying ? 'Stop playback' : 'Play composition'}
-									onClick={togglePlayback}
-								>
-									{isPlaying ? (
-										<CirclePause size={23} />
-									) : (
-										<CirclePlay size={23} />
-									)}
-									<span>{isPlaying ? 'Stop' : 'Play'}</span>
-								</button>
-								<button
-									className='stop-button'
-									type='button'
-									aria-label='Stop playback'
-									title='Stop playback'
-									disabled={!isPlaying}
-									onClick={clearPlayback}
-								>
-									<Square size={15} fill='currentColor' />
-								</button>
-								<div className='playback-label'>
-									<strong>{isPlaying ? 'Now playing' : 'Ready to play'}</strong>
-									<span>Grand piano</span>
-								</div>
-							</div>
-							<div className='side-divider' />
-							<div className='setting-row'>
-								<div>
-									<span className='setting-label'>Tempo</span>
-									<small>Beats per minute</small>
-								</div>
-								<div className='tempo-control'>
+								<div className='playback-controls'>
 									<button
+										className='play-button'
 										type='button'
-										aria-label='Decrease tempo'
-										title='Decrease tempo'
-										onClick={() => changeTempo(tempo - 1)}
+										aria-label={isPlaying ? 'Stop playback' : 'Play composition'}
+										title={isPlaying ? 'Stop playback' : 'Play composition'}
+										onClick={togglePlayback}
 									>
-										<Minus size={13} />
+										{isPlaying ? (
+											<CirclePause size={23} />
+										) : (
+											<CirclePlay size={23} />
+										)}
+										<span>{isPlaying ? 'Stop' : 'Play'}</span>
 									</button>
+									<button
+										className='stop-button'
+										type='button'
+										aria-label='Stop playback'
+										title='Stop playback'
+										disabled={!isPlaying}
+										onClick={clearPlayback}
+									>
+										<Square size={15} fill='currentColor' />
+									</button>
+									<div className='playback-label'>
+										<strong>{isPlaying ? 'Now playing' : 'Ready to play'}</strong>
+										<span>Grand piano</span>
+									</div>
+								</div>
+								<div className='side-divider' />
+								<div className='setting-row'>
+									<div>
+										<span className='setting-label'>Tempo</span>
+										<small>Beats per minute</small>
+									</div>
+									<div className='tempo-control'>
+										<button
+											type='button'
+											aria-label='Decrease tempo'
+											title='Decrease tempo'
+											onClick={() => changeTempo(tempo - 1)}
+										>
+											<Minus size={13} />
+										</button>
+										<input
+											aria-label='Tempo'
+											type='number'
+											min='40'
+											max='200'
+											value={tempo}
+											onChange={(event) => changeTempo(event.target.value)}
+										/>
+										<button
+											type='button'
+											aria-label='Increase tempo'
+											title='Increase tempo'
+											onClick={() => changeTempo(tempo + 1)}
+										>
+											<Plus size={13} />
+										</button>
+									</div>
+								</div>
+								<div className='volume-row'>
+									<span>
+										{volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
+									</span>
 									<input
-										aria-label='Tempo'
-										type='number'
-										min='40'
-										max='200'
-										value={tempo}
-										onChange={(event) => changeTempo(event.target.value)}
+										aria-label='Volume'
+										type='range'
+										min='0'
+										max='100'
+										value={volume}
+										onChange={(event) => setVolume(Number(event.target.value))}
 									/>
-									<button
-										type='button'
-										aria-label='Increase tempo'
-										title='Increase tempo'
-										onClick={() => changeTempo(tempo + 1)}
-									>
-										<Plus size={13} />
-									</button>
+									<span>{volume}%</span>
 								</div>
-							</div>
-							<div className='volume-row'>
-								<span>
-									{volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
-								</span>
-								<input
-									aria-label='Volume'
-									type='range'
-									min='0'
-									max='100'
-									value={volume}
-									onChange={(event) => setVolume(Number(event.target.value))}
-								/>
-								<span>{volume}%</span>
-							</div>
-						</section>
-						<section className='side-section note-input-section'>
-							<div className='toolbar-group'>
-								<span className='toolbar-label'>NOTE VALUE</span>
-								<div
-									className='duration-buttons'
-									role='group'
-									aria-label='Note duration'
-								>
-									{DURATIONS.map((item) => (
-										<button
-											key={item.ticks}
-											type='button'
-											draggable
-											title={`${item.label} note`}
-											aria-label={`${item.label} note`}
-											aria-pressed={selectedDuration === item.ticks}
-											className={
-												selectedDuration === item.ticks ? 'active' : ''
-											}
-											onClick={() => changeDuration(item.ticks)}
-											onDragStart={(event) => {
-												event.dataTransfer.setData(
-													DURATION_DRAG_TYPE,
-													String(item.ticks),
-												)
-												event.dataTransfer.effectAllowed = 'copy'
-											}}
-										>
-											<span
-												className={`duration-symbol duration-${item.notation}`}
+							</section>
+							<section className='side-section note-input-section'>
+								<div className='toolbar-group'>
+									<span className='toolbar-label'>NOTE VALUE</span>
+									<div
+										className='duration-buttons'
+										role='group'
+										aria-label='Note duration'
+									>
+										{DURATIONS.map((item) => (
+											<button
+												key={item.ticks}
+												type='button'
+												draggable
+												title={`${item.label} note`}
+												aria-label={`${item.label} note`}
+												aria-pressed={plainDuration === item.ticks}
+												className={plainDuration === item.ticks ? 'active' : ''}
+												disabled={item.ticks > meter.ticks}
+												onClick={() => changeDuration(paletteTicks(item.ticks))}
+												onDragStart={(event) => {
+													event.dataTransfer.setData(
+														DURATION_DRAG_TYPE,
+														String(paletteTicks(item.ticks)),
+													)
+													event.dataTransfer.effectAllowed = 'copy'
+												}}
 											>
-												{item.ticks === 16
-													? '𝅝'
-													: item.ticks === 8
-														? '𝅗𝅥'
-														: item.ticks === 4
-															? '♩'
-															: item.ticks === 2
-																? '♪'
-																: '𝅘𝅥𝅯'}
-											</span>
-											<span>{item.fraction}</span>
-										</button>
-									))}
-								</div>
-							</div>
-							<div className='toolbar-group'>
-								<span className='toolbar-label'>TYPE</span>
-								<div
-									className='type-buttons'
-									role='group'
-									aria-label='Note type'
-								>
-									<button
-										type='button'
-										aria-pressed={!selectedIsRest}
-										className={!selectedIsRest ? 'active' : ''}
-										onClick={() => changeNoteType(false)}
-										title='Note'
-									>
-										<Music2 size={17} /> Note
-									</button>
-									<button
-										type='button'
-										aria-pressed={selectedIsRest}
-										className={selectedIsRest ? 'active' : ''}
-										onClick={() => changeNoteType(true)}
-										title='Rest'
-									>
-										<span className='rest-symbol'>𝄽</span> Rest
-									</button>
-								</div>
-							</div>
-							<div className='toolbar-group'>
-								<span className='toolbar-label'>ACCIDENTAL</span>
-								<div
-									className='accidental-buttons'
-									role='group'
-									aria-label='Accidental'
-								>
-									{[
-										['sharp', '♯', 'Sharp'],
-										['flat', '♭', 'Flat'],
-									].map(([accidental, symbol, label]) => (
+												<span
+													className={`duration-symbol duration-${item.notation}`}
+												>
+													{item.ticks === 16
+														? '𝅝'
+														: item.ticks === 8
+															? '𝅗𝅥'
+															: item.ticks === 4
+																? '♩'
+																: item.ticks === 2
+																	? '♪'
+																	: '𝅘𝅥𝅯'}
+												</span>
+												<span>{item.fraction}</span>
+											</button>
+										))}
 										<button
-											key={accidental}
 											type='button'
-											title={label}
-											aria-pressed={selectedAccidental === accidental}
-											className={
-												selectedAccidental === accidental ? 'active' : ''
-											}
-											disabled={
-												!selectedNote ||
-												selectedNote.isRest ||
-												!applyAccidental(selectedNote, accidental)
-											}
-											onClick={() => toggleAccidental(accidental)}
+											title='Dotted note'
+											aria-label='Dotted note'
+											aria-pressed={dotted}
+											className={dotted ? 'active' : ''}
+											disabled={!dotToggle || (!dotted && dotToggle > meter.ticks)}
+											onClick={() => changeDuration(dotToggle)}
 										>
-											<span className='accidental-symbol'>{symbol}</span>{' '}
-											{label}
+											<span className='duration-symbol'>•</span>
 										</button>
-									))}
+									</div>
 								</div>
-							</div>
-						</section>
+								<div className='toolbar-group'>
+									<span className='toolbar-label'>TYPE</span>
+									<div
+										className='type-buttons'
+										role='group'
+										aria-label='Note type'
+									>
+										<button
+											type='button'
+											aria-pressed={!selectedIsRest}
+											className={!selectedIsRest ? 'active' : ''}
+											onClick={() => changeNoteType(false)}
+											title='Note'
+										>
+											<Music2 size={17} /> Note
+										</button>
+										<button
+											type='button'
+											aria-pressed={selectedIsRest}
+											className={selectedIsRest ? 'active' : ''}
+											onClick={() => changeNoteType(true)}
+											title='Rest'
+										>
+											<span className='rest-symbol'>𝄽</span> Rest
+										</button>
+									</div>
+								</div>
+								<div className='toolbar-group'>
+									<span className='toolbar-label'>ACCIDENTAL</span>
+									<div
+										className='accidental-buttons'
+										role='group'
+										aria-label='Accidental'
+									>
+										{[
+											['sharp', '♯', 'Sharp'],
+											['flat', '♭', 'Flat'],
+										].map(([accidental, symbol, label]) => (
+											<button
+												key={accidental}
+												type='button'
+												title={label}
+												aria-pressed={selectedAccidental === accidental}
+												className={
+													selectedAccidental === accidental ? 'active' : ''
+												}
+												disabled={
+													!selectedNote ||
+													selectedNote.isRest ||
+													!applyAccidental(selectedNote, accidental)
+												}
+												onClick={() => toggleAccidental(accidental)}
+											>
+												<span className='accidental-symbol'>{symbol}</span>{' '}
+												{label}
+											</button>
+										))}
+									</div>
+								</div>
+							</section>
+						</div>
 
 						<section className='side-section note-section'>
 							<div className='side-heading'>

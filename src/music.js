@@ -6,7 +6,19 @@ export const DURATIONS = [
 	{ ticks: 1, notation: '16', label: 'Sixteenth', fraction: '1/16' },
 ]
 
+const DOTTED_DURATIONS = [
+	{ ticks: 12, notation: 'h', dots: 1, label: 'Dotted half', fraction: '3/4' },
+	{ ticks: 6, notation: 'q', dots: 1, label: 'Dotted quarter', fraction: '3/8' },
+	{ ticks: 3, notation: '8', dots: 1, label: 'Dotted eighth', fraction: '3/16' },
+]
+
 export const DURATION_DRAG_TYPE = 'application/x-cadence-duration'
+
+export const TIME_SIGNATURES = [
+	{ value: '4/4', ticks: 16 },
+	{ value: '3/4', ticks: 12 },
+	{ value: '3/8', ticks: 6 },
+]
 
 const PITCH_NAMES = [
 	'C',
@@ -99,13 +111,38 @@ export function shiftPitch(midi, distance, accidental) {
 }
 
 export function durationFor(ticks) {
-	return DURATIONS.find((duration) => duration.ticks === ticks) ?? DURATIONS[2]
+	return (
+		[...DURATIONS, ...DOTTED_DURATIONS].find(
+			(duration) => duration.ticks === ticks,
+		) ?? DURATIONS[2]
+	)
 }
 
-export function layoutMeasures(notes) {
+export function isDuration(ticks) {
+	return [...DURATIONS, ...DOTTED_DURATIONS].some(
+		(duration) => duration.ticks === ticks,
+	)
+}
+
+export function isDotted(ticks) {
+	return DOTTED_DURATIONS.some((duration) => duration.ticks === ticks)
+}
+
+// The plain value behind `ticks`, dotted if requested; null when that dotted value is unsupported.
+export function withDot(ticks, dotted) {
+	const plain = isDotted(ticks) ? (ticks * 2) / 3 : ticks
+	if (!dotted) return plain
+	return isDotted(plain * 1.5) ? plain * 1.5 : null
+}
+
+export function timeSignatureFor(value) {
+	return TIME_SIGNATURES.find((item) => item.value === value) ?? TIME_SIGNATURES[0]
+}
+
+export function layoutMeasures(notes, measureTicks = 16) {
 	const measures = []
 	let events = []
-	let remaining = 16
+	let remaining = measureTicks
 
 	function finishMeasure() {
 		while (remaining > 0) {
@@ -114,18 +151,19 @@ export function layoutMeasures(notes) {
 				ticks: duration.ticks,
 				isRest: true,
 				filler: true,
-				offset: 16 - remaining,
+				offset: measureTicks - remaining,
 			})
 			remaining -= duration.ticks
 		}
 		measures.push(events)
 		events = []
-		remaining = 16
+		remaining = measureTicks
 	}
 
 	notes.forEach((note, index) => {
-		if (note.ticks > remaining) finishMeasure()
-		events.push({ ...note, index, offset: 16 - remaining })
+		// A note longer than a whole bar (e.g. after changing time) gets an overfull bar of its own.
+		if (note.ticks > remaining && events.length > 0) finishMeasure()
+		events.push({ ...note, index, offset: measureTicks - remaining })
 		remaining -= note.ticks
 		if (remaining === 0) finishMeasure()
 	})
